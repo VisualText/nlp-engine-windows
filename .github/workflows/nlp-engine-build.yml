@@ -55,7 +55,6 @@ jobs:
         rm -rf *.a
         rm -rf nlp.exe
         rm -rf data
-        rm -rf release-assets
         cp -r release-assets/* .
         rm -rf release-assets
         rm -rf nlpengine.zip
