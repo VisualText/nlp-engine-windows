@@ -40,7 +40,7 @@ jobs:
       shell: bash
 
     - name: rename nlpl.exe to nlp.exe
-      run: mv release-assets/nlpl.exe release-assets/nlp.exe
+      run: mv release-assets/nlpw.exe release-assets/nlp.exe
       
     - name: Unzip the nlpengine.zip
       run: |
@@ -49,7 +49,7 @@ jobs:
 
     - name: Copy assets to repository overwiriting existing files
       run: |
-        rm -rf *.a
+        rm -rf *.dll
         rm -rf nlp.exe
         rm -rf data
         cp -r release-assets/* .
