@@ -78,7 +78,8 @@ jobs:
     - name: Continue if branch is up to date
       if: steps.check_update.outputs.up_to_date == 'true'
       run: echo "Branch is up to date, continuing with the next steps..."
-  
+
+    - name: Continue if branch is not up to date
       if: steps.check_update.outputs.up_to_date == 'false'
       run: echo "Branch is not up to date, but continuing with the next steps..."
 
