@@ -32,23 +32,20 @@ jobs:
 
     - name: Download release assets to release-assets directory
       run: |
-        mkdir release-assets
+        mkdir -p release-assets
         wget "${{ steps.get_release.outputs.zip }}" -P release-assets
         wget "${{ steps.get_release.outputs.icu1 }}" -P release-assets
         wget "${{ steps.get_release.outputs.icu2 }}" -P release-assets
         wget "${{ steps.get_release.outputs.nlp }}" -P release-assets       
       shell: bash
 
-    - name: List runner workspace
-      run: find $RUNNER_WORKSPACE
-      shell: bash
-
-    - name: rename nlpw.exe to nlp.exe
-      run: mv release-assets/nlpw.exe release-assets/nlp.exe
+    - name: rename nlpl.exe to nlp.exe
+      run: mv release-assets/nlpl.exe release-assets/nlp.exe
       
     - name: Unzip the nlpengine.zip
       run: |
-        unzip release-assets/nlpengine.zip -d release-assets
+        unzip -o release-assets/nlpengine.zip -d release-assets
+        rm -rf release-assets/nlpengine.zip
 
     - name: Copy assets to repository overwiriting existing files
       run: |
@@ -58,13 +55,36 @@ jobs:
         cp -r release-assets/* .
         rm -rf release-assets
         rm -rf nlpengine.zip
-      shell: bash
 
     - name: Commit and push changes
       run: |
+        git reset --hard
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-        git add .
+        git add *.dll data nlp.exe
+
+    - name: Check if branch is up to date
+      id: check_update
+      run: |
+        git fetch origin main
+        if git diff --quiet HEAD origin/main; then
+          echo "Branch is up to date"
+          echo "::set-output name=up_to_date::true"
+        else
+          echo "Branch is not up to date"
+          echo "::set-output name=up_to_date::false"
+        fi
+        
+    - name: Continue if branch is up to date
+      if: steps.check_update.outputs.up_to_date == 'true'
+      run: echo "Branch is up to date, continuing with the next steps..."
+  
+      if: steps.check_update.outputs.up_to_date == 'false'
+      run: echo "Branch is not up to date, but continuing with the next steps..."
+
+    - name: Commit and push changes
+      if: steps.check_update.outputs.up_to_date == 'false'
+      run: |        
         git commit -m "Update NLP Engine files to latest release ${{ steps.get_release.outputs.tag_name }}"
         git push
       env:
