@@ -2,6 +2,8 @@ name: Update NLP Engine Files
 
 on:
   workflow_dispatch:
+  repository_dispatch:
+    types: [nlp-engine-release]
 
 jobs:
   update-files:
