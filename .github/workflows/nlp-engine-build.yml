@@ -84,8 +84,10 @@ jobs:
     - name: Unzip the nlpengine.zip
       if: steps.check_tag.outputs.update_needed == 'true'
       run: |
-        unzip -o release-assets/nlpengine.zip -d release-assets
-        rm -rf release-assets/nlpengine.zip
+        # Extract nlpengine.zip directly to the root directory
+        unzip -o release-assets/nlpengine.zip -d ./
+        # Remove it from release-assets
+        rm -f release-assets/nlpengine.zip
 
     - name: Debug before copy
       if: steps.check_tag.outputs.update_needed == 'true'
@@ -149,10 +151,11 @@ jobs:
         # First completely remove old files to avoid comparison issues
         rm -rf *.dll
         rm -rf nlp.exe
-        rm -rf data
         
         # Copy new files
-        cp -r release-assets/* .
+        cp release-assets/nlp.exe .
+        cp release-assets/icudt74.dll .
+        cp release-assets/icuuc74.dll .
         rm -rf release-assets
         
         # Verify files were copied
