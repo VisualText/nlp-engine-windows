@@ -4,6 +4,19 @@ Prebuilt Windows binaries of the [VisualText NLP Engine](https://github.com/Visu
 
 The NLP Engine is the runtime for [NLP++](https://visualtext.org/), a domain-specific language for natural-language analyzers. This repository tracks upstream releases automatically and republishes them as a Windows-ready bundle.
 
+## Companion Repositories
+
+The NLP Engine is distributed per platform. Pick the one that matches your OS:
+
+| Platform | Repository |
+|----------|------------|
+| Windows  | [VisualText/nlp-engine-windows](https://github.com/VisualText/nlp-engine-windows) (this repo) |
+| Linux    | [VisualText/nlp-engine-linux](https://github.com/VisualText/nlp-engine-linux) |
+| macOS    | [VisualText/nlp-engine-mac](https://github.com/VisualText/nlp-engine-mac) |
+| Source   | [VisualText/nlp-engine](https://github.com/VisualText/nlp-engine) |
+
+For production use from Python, prefer the [NLPPlus Python package](https://github.com/VisualText/py-package-nlpengine) instead of the simple wrapper shipped here.
+
 ## Repository contents
 
 | Path | Description |
