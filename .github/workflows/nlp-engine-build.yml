@@ -27,16 +27,28 @@ jobs:
           core.setOutput('tag_name', latestRelease.data.tag_name);
           core.setOutput('release_id', latestRelease.data.id);
           
-          const zip = latestRelease.data.assets.find(asset => asset.name.endsWith('nlpengine.zip'));
+          const findAsset = (predicate, label) => {
+            const asset = latestRelease.data.assets.find(predicate);
+            if (!asset) {
+              const available = latestRelease.data.assets.map(a => a.name).join(', ');
+              throw new Error(`Could not find ${label} in release ${latestRelease.data.tag_name}. Available assets: ${available}`);
+            }
+            return asset;
+          };
+
+          const zip = findAsset(a => a.name === 'nlpengine.zip', 'nlpengine.zip');
           core.setOutput('zip', zip.browser_download_url);
-          
-          const icu1 = latestRelease.data.assets.find(asset => asset.name.endsWith('icudt74.dll'));
-          core.setOutput('icu1', icu1.browser_download_url);
-          
-          const icu2 = latestRelease.data.assets.find(asset => asset.name.endsWith('icuuc74.dll'));
-          core.setOutput('icu2', icu2.browser_download_url);
-          
-          const nlp = latestRelease.data.assets.find(asset => asset.name.endsWith('nlpw.exe'));
+
+          const icudt = findAsset(a => /^icudt\d+\.dll$/.test(a.name), 'icudt*.dll');
+          core.setOutput('icudt', icudt.browser_download_url);
+
+          const icuuc = findAsset(a => /^icuuc\d+\.dll$/.test(a.name), 'icuuc*.dll');
+          core.setOutput('icuuc', icuuc.browser_download_url);
+
+          const icuin = findAsset(a => /^icuin\d+\.dll$/.test(a.name), 'icuin*.dll');
+          core.setOutput('icuin', icuin.browser_download_url);
+
+          const nlp = findAsset(a => a.name === 'nlpw.exe', 'nlpw.exe');
           core.setOutput('nlp', nlp.browser_download_url);
 
     - name: Show latest release version
@@ -72,9 +84,10 @@ jobs:
       run: |
         mkdir -p release-assets
         wget "${{ steps.get_release.outputs.zip }}" -P release-assets
-        wget "${{ steps.get_release.outputs.icu1 }}" -P release-assets
-        wget "${{ steps.get_release.outputs.icu2 }}" -P release-assets
-        wget "${{ steps.get_release.outputs.nlp }}" -P release-assets       
+        wget "${{ steps.get_release.outputs.icudt }}" -P release-assets
+        wget "${{ steps.get_release.outputs.icuuc }}" -P release-assets
+        wget "${{ steps.get_release.outputs.icuin }}" -P release-assets
+        wget "${{ steps.get_release.outputs.nlp }}" -P release-assets
       shell: bash
 
     - name: rename nlpw.exe to nlp.exe
@@ -103,26 +116,18 @@ jobs:
         else
           echo "Original nlp.exe does not exist"
         fi
-        
-        if [ -f "icudt74.dll" ]; then
-          echo "Original icudt74.dll exists, size: $(stat -c%s icudt74.dll)"
-          md5sum icudt74.dll
-        else
-          echo "Original icudt74.dll does not exist"
-        fi
-        
-        if [ -f "icuuc74.dll" ]; then
-          echo "Original icuuc74.dll exists, size: $(stat -c%s icuuc74.dll)"
-          md5sum icuuc74.dll
-        else
-          echo "Original icuuc74.dll does not exist"
-        fi
-        
+
+        for f in icudt*.dll icuuc*.dll icuin*.dll; do
+          if [ -f "$f" ]; then
+            echo "Original $f exists, size: $(stat -c%s "$f")"
+            md5sum "$f"
+          fi
+        done
+
         # Check files in release-assets directory
         echo "Downloaded file checksums:"
         md5sum release-assets/nlp.exe
-        md5sum release-assets/icudt74.dll
-        md5sum release-assets/icuuc74.dll
+        md5sum release-assets/icudt*.dll release-assets/icuuc*.dll release-assets/icuin*.dll
 
     # New step: Force remove binary files using git rm
     - name: Force remove all binary files
@@ -149,15 +154,16 @@ jobs:
       if: steps.check_tag.outputs.update_needed == 'true'
       run: |
         # First completely remove old files to avoid comparison issues
-        rm -rf *.dll
-        rm -rf nlp.exe
-        
+        rm -f *.dll
+        rm -f nlp.exe
+
         # Copy new files
         cp release-assets/nlp.exe .
-        cp release-assets/icudt74.dll .
-        cp release-assets/icuuc74.dll .
+        cp release-assets/icudt*.dll .
+        cp release-assets/icuuc*.dll .
+        cp release-assets/icuin*.dll .
         rm -rf release-assets
-        
+
         # Verify files were copied
         echo "After copying, verifying files exist:"
         if [ -f "nlp.exe" ]; then
@@ -165,18 +171,17 @@ jobs:
         else
           echo "ERROR: nlp.exe was not copied!"
         fi
-        
-        if [ -f "icudt74.dll" ]; then
-          echo "New icudt74.dll exists, size: $(stat -c%s icudt74.dll)"
-        else
-          echo "ERROR: icudt74.dll was not copied!"
-        fi
-        
-        if [ -f "icuuc74.dll" ]; then
-          echo "New icuuc74.dll exists, size: $(stat -c%s icuuc74.dll)"
-        else
-          echo "ERROR: icuuc74.dll was not copied!"
-        fi
+
+        for prefix in icudt icuuc icuin; do
+          matches=( ${prefix}*.dll )
+          if [ -f "${matches[0]}" ]; then
+            for f in "${matches[@]}"; do
+              echo "New $f exists, size: $(stat -c%s "$f")"
+            done
+          else
+            echo "ERROR: ${prefix}*.dll was not copied!"
+          fi
+        done
 
     - name: Debug after copy
       if: steps.check_tag.outputs.update_needed == 'true'
@@ -226,16 +231,13 @@ jobs:
             echo "nlp.exe exists, size: $(stat -c%s nlp.exe)"
             md5sum nlp.exe
           fi
-          
-          if [ -f "icudt74.dll" ]; then
-            echo "icudt74.dll exists, size: $(stat -c%s icudt74.dll)"
-            md5sum icudt74.dll
-          fi
-          
-          if [ -f "icuuc74.dll" ]; then
-            echo "icuuc74.dll exists, size: $(stat -c%s icuuc74.dll)"
-            md5sum icuuc74.dll
-          fi
+
+          for f in icudt*.dll icuuc*.dll icuin*.dll; do
+            if [ -f "$f" ]; then
+              echo "$f exists, size: $(stat -c%s "$f")"
+              md5sum "$f"
+            fi
+          done
         else
           echo "Changes detected in files"
           git diff --staged --name-status
