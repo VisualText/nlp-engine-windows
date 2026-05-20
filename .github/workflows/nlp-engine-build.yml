@@ -51,6 +51,18 @@ jobs:
           const nlp = findAsset(a => a.name === 'nlpw.exe', 'nlpw.exe');
           core.setOutput('nlp', nlp.browser_download_url);
 
+          // Windows compile libraries (headers + .lib files) used by
+          // scripts/compile-analyzer.ps1 and scripts/compile-kb.ps1 to link a
+          // generated analyzer into a .dll. Optional: if upstream has not
+          // attached it to this release, the workflow continues without it.
+          const compileLibsAsset = latestRelease.data.assets.find(a => a.name === 'nlpengine-compile-libs.zip');
+          if (compileLibsAsset) {
+            core.setOutput('compileLibs', compileLibsAsset.browser_download_url);
+          } else {
+            console.log('nlpengine-compile-libs.zip not found in this release — compile-libs/ will not be updated.');
+            core.setOutput('compileLibs', '');
+          }
+
     - name: Show latest release version
       run: echo "Latest release version is ${{ steps.get_release.outputs.tag_name }}"
 
@@ -88,6 +100,13 @@ jobs:
         wget "${{ steps.get_release.outputs.icuuc }}" -P release-assets
         wget "${{ steps.get_release.outputs.icuin }}" -P release-assets
         wget "${{ steps.get_release.outputs.nlp }}" -P release-assets
+
+        # Compile-libs is optional — skip cleanly if upstream did not attach it.
+        if [ -n "${{ steps.get_release.outputs.compileLibs }}" ]; then
+          wget "${{ steps.get_release.outputs.compileLibs }}" -P release-assets
+        else
+          echo "Skipping compile-libs download (asset URL is empty)"
+        fi
       shell: bash
 
     - name: rename nlpw.exe to nlp.exe
@@ -101,6 +120,30 @@ jobs:
         unzip -o release-assets/nlpengine.zip -d ./
         # Remove it from release-assets
         rm -f release-assets/nlpengine.zip
+
+    - name: Unzip nlpengine-compile-libs.zip into compile-libs/
+      if: steps.check_tag.outputs.update_needed == 'true'
+      run: |
+        zip_path="release-assets/nlpengine-compile-libs.zip"
+        if [ -f "$zip_path" ]; then
+          # compile-libs/ houses the headers and .lib files used by
+          # scripts/compile-analyzer.ps1 and scripts/compile-kb.ps1.
+          rm -rf compile-libs
+          mkdir -p compile-libs
+          unzip -o "$zip_path" -d compile-libs
+          # Upstream wraps the contents in a top-level compile-libs/ dir.
+          # Flatten so include/ and lib/ live at compile-libs/ root.
+          if [ -d "compile-libs/compile-libs" ] && [ ! -d "compile-libs/include" ]; then
+            mv compile-libs/compile-libs/* compile-libs/
+            rmdir compile-libs/compile-libs
+          fi
+          echo "Files in compile-libs:"
+          ls -la compile-libs
+          rm -f "$zip_path"
+        else
+          echo "No compile-libs zip downloaded — skipping extraction"
+        fi
+      shell: bash
 
     - name: Debug before copy
       if: steps.check_tag.outputs.update_needed == 'true'
@@ -140,6 +183,7 @@ jobs:
         # Force remove binary files
         echo "Removing binary files using git rm to ensure they're properly tracked..."
         git rm -f *.dll nlp.exe || true
+        git rm -rf --ignore-unmatch compile-libs || true
         git rm -f .version-flag || true
         
         # Commit the removal
