@@ -121,30 +121,6 @@ jobs:
         # Remove it from release-assets
         rm -f release-assets/nlpengine.zip
 
-    - name: Unzip nlpengine-compile-libs.zip into compile-libs/
-      if: steps.check_tag.outputs.update_needed == 'true'
-      run: |
-        zip_path="release-assets/nlpengine-compile-libs.zip"
-        if [ -f "$zip_path" ]; then
-          # compile-libs/ houses the headers and .lib files used by
-          # scripts/compile-analyzer.ps1 and scripts/compile-kb.ps1.
-          rm -rf compile-libs
-          mkdir -p compile-libs
-          unzip -o "$zip_path" -d compile-libs
-          # Upstream wraps the contents in a top-level compile-libs/ dir.
-          # Flatten so include/ and lib/ live at compile-libs/ root.
-          if [ -d "compile-libs/compile-libs" ] && [ ! -d "compile-libs/include" ]; then
-            mv compile-libs/compile-libs/* compile-libs/
-            rmdir compile-libs/compile-libs
-          fi
-          echo "Files in compile-libs:"
-          ls -la compile-libs
-          rm -f "$zip_path"
-        else
-          echo "No compile-libs zip downloaded — skipping extraction"
-        fi
-      shell: bash
-
     - name: Debug before copy
       if: steps.check_tag.outputs.update_needed == 'true'
       run: |
@@ -206,6 +182,29 @@ jobs:
         cp release-assets/icudt*.dll .
         cp release-assets/icuuc*.dll .
         cp release-assets/icuin*.dll .
+
+        # Extract nlpengine-compile-libs.zip into compile-libs/. Must run AFTER
+        # the "Force remove all binary files" step above, otherwise its
+        # `git rm -rf compile-libs` would wipe the freshly-extracted tree from
+        # disk before the final commit. Optional asset: skip cleanly if upstream
+        # did not attach it to this release.
+        zip_path="release-assets/nlpengine-compile-libs.zip"
+        if [ -f "$zip_path" ]; then
+          rm -rf compile-libs
+          mkdir -p compile-libs
+          unzip -o "$zip_path" -d compile-libs
+          # Upstream wraps the contents in a top-level compile-libs/ dir.
+          # Flatten so include/ and lib/ live at compile-libs/ root.
+          if [ -d "compile-libs/compile-libs" ] && [ ! -d "compile-libs/include" ]; then
+            mv compile-libs/compile-libs/* compile-libs/
+            rmdir compile-libs/compile-libs
+          fi
+          echo "Files in compile-libs:"
+          ls -la compile-libs
+        else
+          echo "No compile-libs zip downloaded — skipping extraction"
+        fi
+
         rm -rf release-assets
 
         # Verify files were copied

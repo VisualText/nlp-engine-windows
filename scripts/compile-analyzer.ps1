@@ -169,6 +169,17 @@ Write-Host "==> [1/5] Locate Visual Studio (VsDevCmd.bat)"
 $VsDevCmd = Find-VsDevCmd
 Write-Host "    Using: $VsDevCmd"
 
+# VS 18's VsDevCmd.bat shells out to bare `vswhere.exe` (without an absolute
+# path), so the Installer directory must be on PATH for the subshell, otherwise
+# every cmd.exe-hosted build step fails before it even reaches our command.
+# VS 2022 invokes vswhere via absolute path and is unaffected.
+$programFilesX86 = ${env:ProgramFiles(x86)}
+if (-not $programFilesX86) { $programFilesX86 = 'C:\Program Files (x86)' }
+$VsInstallerDir = Join-Path $programFilesX86 'Microsoft Visual Studio\Installer'
+if ((Test-Path (Join-Path $VsInstallerDir 'vswhere.exe')) -and ($env:PATH -notlike "*$VsInstallerDir*")) {
+    $env:PATH = "$VsInstallerDir;$env:PATH"
+}
+
 Write-Host "==> [2/5] Ensure ICU import libraries exist"
 Ensure-IcuImportLibs -VsDevCmd $VsDevCmd
 
@@ -184,7 +195,7 @@ New-Item -ItemType Directory -Path $SrcDir | Out-Null
 
 [System.IO.File]::WriteAllText(
     (Join-Path $SrcDir 'StdAfx.h'),
-    "#pragma once`n#include `"my_tchar.h`"`n",
+    "#pragma once`n#include <windows.h>`n#include <tchar.h>`n#include `"my_tchar.h`"`n",
     [System.Text.UTF8Encoding]::new($false)
 )
 
@@ -207,9 +218,9 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "$cmakeAnalyzer")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "$cmakeAnalyzer")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "$cmakeAnalyzer")
 foreach(CFG IN ITEMS DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
-    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_\${CFG} "$cmakeAnalyzer")
-    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_\${CFG} "$cmakeAnalyzer")
-    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_\${CFG} "$cmakeAnalyzer")
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_`${CFG} "$cmakeAnalyzer")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_`${CFG} "$cmakeAnalyzer")
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_`${CFG} "$cmakeAnalyzer")
 endforeach()
 
 file(GLOB GENERATED_CPP
@@ -220,7 +231,7 @@ if(NOT GENERATED_CPP)
     message(FATAL_ERROR "No generated .cpp files found under $cmakeAnalyzer/{run,kb}/ -- did -COMPILE succeed?")
 endif()
 
-add_library(nlp_generated SHARED \${GENERATED_CPP})
+add_library(nlp_generated SHARED `${GENERATED_CPP})
 set_target_properties(nlp_generated PROPERTIES OUTPUT_NAME "$AnalyzerName")
 
 target_include_directories(nlp_generated PRIVATE
