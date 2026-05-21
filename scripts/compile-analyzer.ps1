@@ -32,7 +32,6 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $AnalyzerDir = (Resolve-Path $AnalyzerDir).Path
-$AnalyzerName = Split-Path $AnalyzerDir -Leaf
 
 $NlpExe = Join-Path $RepoRoot 'nlp.exe'
 $CompileLibs = Join-Path $RepoRoot 'compile-libs'
@@ -199,6 +198,36 @@ New-Item -ItemType Directory -Path $SrcDir | Out-Null
     [System.Text.UTF8Encoding]::new($false)
 )
 
+# nlp.exe's loader (cs/libconsh/dyn.cpp) resolves exactly one symbol from the
+# analyzer DLL via GetProcAddress: `kb_setup`. The generator does not emit it;
+# upstream historically supplies a hand-written shim per analyzer that just
+# forwards to the generated cc_ini. We synthesize the same shim here so any
+# analyzer compiles out of the box, and tag it extern "C" + dllexport so it
+# lands in the export table undecorated.
+$kbSetupCpp = @'
+#include <iostream>
+#include "Cc_code.h"
+// libconsh.h must precede cg.h: cg.h's `class LIBCONSH_API CG` only parses
+// correctly when LIBCONSH_API has been #defined (to dllimport / empty).
+#include "consh/libconsh.h"
+#include "consh/cg.h"
+
+extern "C" __declspec(dllexport) bool kb_setup(void *cg) {
+    std::cerr << "[kb_setup] cg=" << cg << "\n";
+    CG *c = (CG*)cg;
+    std::cerr << "[kb_setup] kbm_=" << c->kbm_
+              << " asym_=" << c->asym_
+              << " acon_=" << c->acon_ << "\n";
+    std::cerr.flush();
+    return cc_ini(cg);
+}
+'@
+[System.IO.File]::WriteAllText(
+    (Join-Path $SrcDir 'kb_setup.cpp'),
+    $kbSetupCpp,
+    [System.Text.UTF8Encoding]::new($false)
+)
+
 Write-Host "==> [4/5] Generate CMakeLists.txt"
 $cmakeAnalyzer  = $AnalyzerDir       -replace '\\', '/'
 $cmakeSrcDir    = $SrcDir            -replace '\\', '/'
@@ -213,14 +242,16 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Drop the .dll directly into the analyzer dir (no Release/ subfolder).
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "$cmakeAnalyzer")
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "$cmakeAnalyzer")
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "$cmakeAnalyzer")
+# The engine's loader (cs/libconsh/cg.cpp) hardcodes the lookup path to
+# <analyzer-dir>\bin\kb.dll (kbu/kbd/kbdu for the unicode/debug variants),
+# so drop the .dll into bin/ with OUTPUT_NAME=kb below.
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "$cmakeAnalyzer/bin")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "$cmakeAnalyzer/bin")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "$cmakeAnalyzer/bin")
 foreach(CFG IN ITEMS DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
-    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_`${CFG} "$cmakeAnalyzer")
-    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_`${CFG} "$cmakeAnalyzer")
-    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_`${CFG} "$cmakeAnalyzer")
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_`${CFG} "$cmakeAnalyzer/bin")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_`${CFG} "$cmakeAnalyzer/bin")
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_`${CFG} "$cmakeAnalyzer/bin")
 endforeach()
 
 file(GLOB GENERATED_CPP
@@ -231,8 +262,9 @@ if(NOT GENERATED_CPP)
     message(FATAL_ERROR "No generated .cpp files found under $cmakeAnalyzer/{run,kb}/ -- did -COMPILE succeed?")
 endif()
 
-add_library(nlp_generated SHARED `${GENERATED_CPP})
-set_target_properties(nlp_generated PROPERTIES OUTPUT_NAME "$AnalyzerName")
+add_library(nlp_generated SHARED `${GENERATED_CPP} "$cmakeSrcDir/kb_setup.cpp")
+# Engine's loader hardcodes "kb.dll" (and variants kbu/kbd/kbdu).
+set_target_properties(nlp_generated PROPERTIES OUTPUT_NAME "kb")
 
 target_include_directories(nlp_generated PRIVATE
     "$cmakeSrcDir"
@@ -265,7 +297,7 @@ Write-Host "==> [5/5] cmake configure + build"
 Invoke-WithVsDev -VsDevCmd $VsDevCmd -Command "cmake -S `"$SrcDir`" -B `"$BuildDir`""
 Invoke-WithVsDev -VsDevCmd $VsDevCmd -Command "cmake --build `"$BuildDir`" --config Release"
 
-$outDll = Join-Path $AnalyzerDir "$AnalyzerName.dll"
+$outDll = Join-Path $AnalyzerDir 'bin\kb.dll'
 if (Test-Path $outDll) {
     Write-Host ""
     Write-Host "Built: $outDll"
