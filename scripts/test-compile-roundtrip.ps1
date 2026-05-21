@@ -59,7 +59,6 @@ if (-not (Test-Path $NlpExe)) {
     throw "nlp.exe not found at $NlpExe"
 }
 
-$AnalyzerName  = Split-Path $AnalyzerDir -Leaf
 $InputLeaf     = Split-Path $InputFile -Leaf
 $InputDir      = Split-Path $InputFile -Parent
 $LogDir        = Join-Path $InputDir "$InputLeaf`_log"
@@ -111,7 +110,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "compile-analyzer.ps1 failed (exit $LASTEXITCODE)"
 }
 
-$Dll = Join-Path $AnalyzerDir "$AnalyzerName.dll"
+$Dll = Join-Path $AnalyzerDir 'bin\kb.dll'
 if (-not (Test-Path $Dll)) {
     throw "Expected compiled DLL not found: $Dll"
 }
