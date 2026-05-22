@@ -1,8 +1,8 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-  Compile an NLP++ analyzer (and its KB) to a native .dll that nlp.exe can
-  load with -COMPILED.
+  Compile an NLP++ analyzer's KB into the native shared library that the
+  EMBEDED_KB-enabled engine LoadLibrary's at -COMPILED time.
 
 .PARAMETER AnalyzerDir
   Path to the analyzer directory (e.g. data\rfb).
@@ -19,7 +19,11 @@
   import libraries (icudt78.lib, icuin78.lib, icuuc78.lib) from the bundled
   DLLs using dumpbin + lib.exe; subsequent runs reuse them.
 
-  Output: <AnalyzerDir>\<analyzer-name>.dll
+  Analyzer pass code itself is still interpreted -- upstream removed ana_gen
+  in 1999, so there is no compiled-rules path. The engine falls back to
+  interpreted execution for the rules and only the KB is native.
+
+  Output: <AnalyzerDir>\bin\kb.dll
 #>
 
 [CmdletBinding()]
@@ -182,7 +186,7 @@ if ((Test-Path (Join-Path $VsInstallerDir 'vswhere.exe')) -and ($env:PATH -notli
 Write-Host "==> [2/5] Ensure ICU import libraries exist"
 Ensure-IcuImportLibs -VsDevCmd $VsDevCmd
 
-Write-Host "==> [3/5] nlp.exe -COMPILE  (emits run\*.cpp and kb\*.cpp under $AnalyzerDir)"
+Write-Host "==> [3/5] nlp.exe -COMPILE  (emits Cc_code.cpp + Sym*/Con*/Ptr*/St*.cpp under $AnalyzerDir\kb)"
 $compileCmd = "`"$NlpExe`" -COMPILE -ANA `"$AnalyzerDir`" -WORK `"$RepoRoot`" `"$InputFile`""
 Invoke-WithVsDev -VsDevCmd $VsDevCmd -Command $compileCmd
 
@@ -254,12 +258,9 @@ foreach(CFG IN ITEMS DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_`${CFG} "$cmakeAnalyzer/bin")
 endforeach()
 
-file(GLOB GENERATED_CPP
-    "$cmakeAnalyzer/run/*.cpp"
-    "$cmakeAnalyzer/kb/*.cpp"
-)
+file(GLOB GENERATED_CPP "$cmakeAnalyzer/kb/*.cpp")
 if(NOT GENERATED_CPP)
-    message(FATAL_ERROR "No generated .cpp files found under $cmakeAnalyzer/{run,kb}/ -- did -COMPILE succeed?")
+    message(FATAL_ERROR "No generated .cpp files found under $cmakeAnalyzer/kb/ -- did -COMPILE succeed?")
 endif()
 
 add_library(nlp_generated SHARED `${GENERATED_CPP} "$cmakeSrcDir/kb_setup.cpp")
@@ -269,7 +270,6 @@ set_target_properties(nlp_generated PROPERTIES OUTPUT_NAME "kb")
 target_include_directories(nlp_generated PRIVATE
     "$cmakeSrcDir"
     "$cmakeAnalyzer"
-    "$cmakeAnalyzer/run"
     "$cmakeAnalyzer/kb"
     "$cmakeInclApi"
     "$cmakeInclCs"
