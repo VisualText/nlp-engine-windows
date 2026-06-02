@@ -72,7 +72,7 @@ engine = NLPEngine(
     engineDir=r"C:\path\to\nlp-engine-windows",
     analyzersDir=r"C:\path\to\analyzers",
 )
-engine.analyzeInput("my-analyzer", "sample.txt")
+engine.analyzeFile("my-analyzer", "sample.txt")
 ```
 
 For production workloads, prefer the [NLPPlus Python package](https://github.com/VisualText/py-package-nlpengine), which links against the engine directly instead of shelling out.
