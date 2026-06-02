@@ -1,8 +1,8 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-  Compile an NLP++ analyzer's KB into the native shared library that the
-  EMBEDED_KB-enabled engine LoadLibrary's at -COMPILED time.
+  Compile an NLP++ analyzer into the native shared libraries that the
+  -COMPILED engine LoadLibrary's at runtime.
 
 .PARAMETER AnalyzerDir
   Path to the analyzer directory (e.g. data\rfb).
@@ -10,8 +10,14 @@
 .PARAMETER InputFile
   Path to an input text file the engine will run over to drive the compile.
 
+.PARAMETER KbOnly
+  If set, build only the KB (legacy behaviour) — produces just bin\kb.dll
+  and bin\kbu.dll. Without it (default), the full analyzer is compiled
+  and bin\run.dll / bin\runu.dll are produced too.
+
 .EXAMPLE
   scripts\compile-analyzer.ps1 data\rfb data\rfb\input\text.txt
+  scripts\compile-analyzer.ps1 -KbOnly data\rfb data\rfb\input\text.txt
 
 .NOTES
   Requires Visual Studio 2022 (or Build Tools) with the "Desktop development
@@ -19,17 +25,22 @@
   import libraries (icudt78.lib, icuin78.lib, icuuc78.lib) from the bundled
   DLLs using dumpbin + lib.exe; subsequent runs reuse them.
 
-  Analyzer pass code itself is still interpreted -- upstream removed ana_gen
-  in 1999, so there is no compiled-rules path. The engine falls back to
-  interpreted execution for the rules and only the KB is native.
+  Output (default, full-analyzer mode):
+    <AnalyzerDir>\bin\run.dll
+    <AnalyzerDir>\bin\runu.dll
+    <AnalyzerDir>\bin\kb.dll
+    <AnalyzerDir>\bin\kbu.dll
 
-  Output: <AnalyzerDir>\bin\kb.dll
+  Output (-KbOnly):
+    <AnalyzerDir>\bin\kb.dll
+    <AnalyzerDir>\bin\kbu.dll
 #>
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)] [string] $AnalyzerDir,
-    [Parameter(Mandatory = $true, Position = 1)] [string] $InputFile
+    [Parameter(Mandatory = $true, Position = 1)] [string] $InputFile,
+    [switch] $KbOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -50,6 +61,16 @@ if (-not (Test-Path $InputFile)) {
     throw "Input file not found: $InputFile"
 }
 $InputFile = (Resolve-Path $InputFile).Path
+
+if ($KbOnly) {
+    $CompileFlag = '-COMPILEKB'
+    $TargetName  = 'nlp_kb'
+    $SrcGlobDesc = 'kb'
+} else {
+    $CompileFlag = '-COMPILE'
+    $TargetName  = 'nlp_analyzer'
+    $SrcGlobDesc = 'run + kb'
+}
 
 function Find-VsDevCmd {
     $programFilesX86 = ${env:ProgramFiles(x86)}
@@ -125,7 +146,6 @@ function Get-DumpbinExports {
             }
             continue
         }
-        # "       1    0 00071FA0 u_UCharDirection_swap_78"
         if ($trimmed -match '^\s*\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)') {
             $names.Add($matches[1])
         } else {
@@ -173,9 +193,7 @@ $VsDevCmd = Find-VsDevCmd
 Write-Host "    Using: $VsDevCmd"
 
 # VS 18's VsDevCmd.bat shells out to bare `vswhere.exe` (without an absolute
-# path), so the Installer directory must be on PATH for the subshell, otherwise
-# every cmd.exe-hosted build step fails before it even reaches our command.
-# VS 2022 invokes vswhere via absolute path and is unaffected.
+# path), so the Installer directory must be on PATH for the subshell.
 $programFilesX86 = ${env:ProgramFiles(x86)}
 if (-not $programFilesX86) { $programFilesX86 = 'C:\Program Files (x86)' }
 $VsInstallerDir = Join-Path $programFilesX86 'Microsoft Visual Studio\Installer'
@@ -186,8 +204,8 @@ if ((Test-Path (Join-Path $VsInstallerDir 'vswhere.exe')) -and ($env:PATH -notli
 Write-Host "==> [2/5] Ensure ICU import libraries exist"
 Ensure-IcuImportLibs -VsDevCmd $VsDevCmd
 
-Write-Host "==> [3/5] nlp.exe -COMPILE  (emits Cc_code.cpp + Sym*/Con*/Ptr*/St*.cpp under $AnalyzerDir\kb)"
-$compileCmd = "`"$NlpExe`" -COMPILE -ANA `"$AnalyzerDir`" -WORK `"$RepoRoot`" `"$InputFile`""
+Write-Host "==> [3/5] nlp.exe $CompileFlag  (emits .cpp trees under $AnalyzerDir\{$SrcGlobDesc}\)"
+$compileCmd = "`"$NlpExe`" $CompileFlag -ANA `"$AnalyzerDir`" -WORK `"$RepoRoot`" `"$InputFile`""
 Invoke-WithVsDev -VsDevCmd $VsDevCmd -Command $compileCmd
 
 $BuildRoot = Join-Path $AnalyzerDir '.nlp-compile'
@@ -196,41 +214,19 @@ $BuildDir  = Join-Path $BuildRoot 'build'
 if (Test-Path $BuildRoot) { Remove-Item -Recurse -Force $BuildRoot }
 New-Item -ItemType Directory -Path $SrcDir | Out-Null
 
+# Engine-generated .cpp files begin with `#include "StdAfx.h"`. The cmake
+# template force-includes this file too via /FI. Provide a minimal stub
+# matching what nlp-compile-service ships.
 [System.IO.File]::WriteAllText(
     (Join-Path $SrcDir 'StdAfx.h'),
     "#pragma once`n#include <windows.h>`n#include <tchar.h>`n#include `"my_tchar.h`"`n",
     [System.Text.UTF8Encoding]::new($false)
 )
 
-# nlp.exe's loader (cs/libconsh/dyn.cpp) resolves exactly one symbol from the
-# analyzer DLL via GetProcAddress: `kb_setup`. The generator does not emit it;
-# upstream historically supplies a hand-written shim per analyzer that just
-# forwards to the generated cc_ini. We synthesize the same shim here so any
-# analyzer compiles out of the box, and tag it extern "C" + dllexport so it
-# lands in the export table undecorated.
-$kbSetupCpp = @'
-#include <iostream>
-#include "Cc_code.h"
-// libconsh.h must precede cg.h: cg.h's `class LIBCONSH_API CG` only parses
-// correctly when LIBCONSH_API has been #defined (to dllimport / empty).
-#include "consh/libconsh.h"
-#include "consh/cg.h"
-
-extern "C" __declspec(dllexport) bool kb_setup(void *cg) {
-    std::cerr << "[kb_setup] cg=" << cg << "\n";
-    CG *c = (CG*)cg;
-    std::cerr << "[kb_setup] kbm_=" << c->kbm_
-              << " asym_=" << c->asym_
-              << " acon_=" << c->acon_ << "\n";
-    std::cerr.flush();
-    return cc_ini(cg);
-}
-'@
-[System.IO.File]::WriteAllText(
-    (Join-Path $SrcDir 'kb_setup.cpp'),
-    $kbSetupCpp,
-    [System.Text.UTF8Encoding]::new($false)
-)
+# NOTE: the manual kb_setup.cpp shim used to be generated here. Engine
+# v3.1.44+ emits a kb_setup wrapper from cc_gen.cpp automatically
+# (NLP-ENGINE-495), so the manual shim would now produce a duplicate
+# symbol at link time. Dropped.
 
 Write-Host "==> [4/5] Generate CMakeLists.txt"
 $cmakeAnalyzer  = $AnalyzerDir       -replace '\\', '/'
@@ -239,16 +235,22 @@ $cmakeInclApi   = (Join-Path $CompileLibs 'include\Api')  -replace '\\', '/'
 $cmakeInclCs    = (Join-Path $CompileLibs 'include\cs')   -replace '\\', '/'
 $cmakeLibDir    = (Join-Path $CompileLibs 'lib')          -replace '\\', '/'
 
+if ($KbOnly) {
+    $globExpr = "`"$cmakeAnalyzer/kb/*.cpp`""
+} else {
+    $globExpr = "`"$cmakeAnalyzer/run/*.cpp`" `"$cmakeAnalyzer/kb/*.cpp`""
+}
+
 $cmakeText = @"
 cmake_minimum_required(VERSION 3.16)
-project(nlp_generated_library LANGUAGES CXX)
+project(${TargetName}_library LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# The engine's loader (cs/libconsh/cg.cpp) hardcodes the lookup path to
-# <analyzer-dir>\bin\kb.dll (kbu/kbd/kbdu for the unicode/debug variants),
-# so drop the .dll into bin/ with OUTPUT_NAME=kb below.
+# Drop the .dll into <analyzer-dir>\bin\ — that's what the engine's
+# load_compiled() (lite/nlp.cpp:1242) and consh's KB loader
+# (cs/libconsh/cg.cpp:168) LoadLibrary at runtime.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "$cmakeAnalyzer/bin")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "$cmakeAnalyzer/bin")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "$cmakeAnalyzer/bin")
@@ -258,32 +260,32 @@ foreach(CFG IN ITEMS DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_`${CFG} "$cmakeAnalyzer/bin")
 endforeach()
 
-file(GLOB GENERATED_CPP "$cmakeAnalyzer/kb/*.cpp")
+file(GLOB GENERATED_CPP $globExpr)
 if(NOT GENERATED_CPP)
-    message(FATAL_ERROR "No generated .cpp files found under $cmakeAnalyzer/kb/ -- did -COMPILE succeed?")
+    message(FATAL_ERROR "No generated .cpp files found -- did $CompileFlag succeed?")
 endif()
 
-add_library(nlp_generated SHARED `${GENERATED_CPP} "$cmakeSrcDir/kb_setup.cpp")
-# Engine's loader hardcodes "kb.dll" (and variants kbu/kbd/kbdu).
-set_target_properties(nlp_generated PROPERTIES OUTPUT_NAME "kb")
+add_library($TargetName SHARED `${GENERATED_CPP})
+set_target_properties($TargetName PROPERTIES OUTPUT_NAME "$TargetName")
 
-target_include_directories(nlp_generated PRIVATE
+target_include_directories($TargetName PRIVATE
     "$cmakeSrcDir"
     "$cmakeAnalyzer"
+    "$cmakeAnalyzer/run"
     "$cmakeAnalyzer/kb"
     "$cmakeInclApi"
     "$cmakeInclCs"
 )
 
-target_link_directories(nlp_generated PRIVATE "$cmakeLibDir")
-target_link_libraries(nlp_generated PRIVATE
+target_link_directories($TargetName PRIVATE "$cmakeLibDir")
+target_link_libraries($TargetName PRIVATE
     prim kbm consh words lite
     icuin78 icuuc78 icudt78
 )
 
-target_compile_definitions(nlp_generated PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_compile_definitions($TargetName PRIVATE _CRT_SECURE_NO_WARNINGS)
 if(MSVC)
-    target_compile_options(nlp_generated PRIVATE /wd4005 /FI"StdAfx.h")
+    target_compile_options($TargetName PRIVATE /wd4005 /FI"StdAfx.h")
 endif()
 "@
 
@@ -294,14 +296,32 @@ endif()
 )
 
 Write-Host "==> [5/5] cmake configure + build"
-Invoke-WithVsDev -VsDevCmd $VsDevCmd -Command "cmake -S `"$SrcDir`" -B `"$BuildDir`""
+Invoke-WithVsDev -VsDevCmd $VsDevCmd -Command "cmake -S `"$SrcDir`" -B `"$BuildDir`" -A x64"
 Invoke-WithVsDev -VsDevCmd $VsDevCmd -Command "cmake --build `"$BuildDir`" --config Release"
 
-$outDll = Join-Path $AnalyzerDir 'bin\kb.dll'
-if (Test-Path $outDll) {
-    Write-Host ""
-    Write-Host "Built: $outDll"
-    Write-Host "Run:   $NlpExe -COMPILED -ANA `"$AnalyzerDir`" -WORK `"$RepoRoot`" `"$InputFile`""
-} else {
-    throw "Expected output $outDll was not produced"
+# Output landed at <analyzer-dir>\bin\<TargetName>.dll. Stage it under
+# every name the engine's load paths look for: run.dll / runu.dll /
+# kb.dll / kbu.dll. The "u" variants are the UNICODE build flavour;
+# copying lets either engine flavour load without a rebuild.
+$builtDll = Join-Path $AnalyzerDir "bin\$TargetName.dll"
+if (-not (Test-Path $builtDll)) {
+    throw "Expected output $builtDll was not produced"
 }
+
+if ($KbOnly) {
+    $stagedNames = @('kb.dll', 'kbu.dll')
+} else {
+    $stagedNames = @('run.dll', 'runu.dll', 'kb.dll', 'kbu.dll')
+}
+
+Write-Host ""
+Write-Host "==> Staging $(Split-Path $builtDll -Leaf) into $AnalyzerDir\bin\"
+foreach ($name in $stagedNames) {
+    $dest = Join-Path $AnalyzerDir "bin\$name"
+    Copy-Item -Force $builtDll $dest
+}
+
+Write-Host ""
+Write-Host "Built:  $builtDll"
+Write-Host "Staged: $($stagedNames -join ' ')"
+Write-Host "Run:    $NlpExe -COMPILED -ANA `"$AnalyzerDir`" -WORK `"$RepoRoot`" `"$InputFile`""
