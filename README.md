@@ -25,7 +25,7 @@ For production use from Python, prefer the [NLPPlus Python package](https://gith
 | `icudt*.dll`, `icuuc*.dll`, `icuin*.dll` | ICU runtime DLLs that `nlp.exe` links against. The version suffix (74, 78, …) tracks whichever ICU upstream is currently using. |
 | `data/` | NLP Engine data directory containing the `rfb` (rules-from-builder) knowledge base. `nlp.exe` is invoked with this directory as `-WORK`. |
 | `compile-libs/` | Headers (`include/Api/`, `include/cs/`) and engine static libraries (`lib/{prim,kbm,consh,words,lite}.lib`) used to link a compiled analyzer/KB into a `.dll`. Populated by the workflow from upstream's `nlpengine-compile-libs.zip`. |
-| `scripts/compile-analyzer.{ps1,bat}` | Compile the analyzer's KB into `<analyzer>\bin\kb.dll`. |
+| `scripts/compile-analyzer.{ps1,bat}` | Compile the analyzer (run+kb) into `<analyzer>\bin\run.dll` + `<analyzer>\bin\kb.dll`. |
 | `python/` | Git submodule pointing at [VisualText/python](https://github.com/VisualText/python) — a thin Python wrapper (`NLPEngine` class) that shells out to `nlp.exe`. |
 | `.version-flag` | Records the upstream release tag currently vendored (e.g. `v3.0.2`). Used by the update workflow to detect stale builds. |
 | `.github/workflows/nlp-engine-build.yml` | Automation that pulls the latest upstream release and commits/tags it here. |
@@ -77,15 +77,25 @@ engine.analyzeInput("my-analyzer", "sample.txt")
 
 For production workloads, prefer the [NLPPlus Python package](https://github.com/VisualText/py-package-nlpengine), which links against the engine directly instead of shelling out.
 
-## Compiling an analyzer's KB to a native DLL
+## Compiling an analyzer to native DLLs
 
-By default `nlp.exe` runs analyzers fully interpreted. With the new `EMBEDED_KB`-enabled engine, the **knowledge base** can be compiled to a native DLL that the engine `LoadLibrary`s at `-COMPILED` time and calls into via a single exported `kb_setup` symbol. (Analyzer pass code itself is still interpreted — upstream removed `ana_gen` in 1999, so there is no compiled-rules path; the engine falls back to interpreted execution for the rules and only the KB is native.)
+By default `nlp.exe` runs analyzers fully interpreted from the `.nlp`
+source. With the engine's `-COMPILED` mode, both the **analyzer body**
+(the rule passes) and the **knowledge base** are compiled to native
+DLLs that the engine `LoadLibrary`s at runtime — the analyzer runs
+entirely from compiled code, so source edits to `.nlp` files between
+runs don't affect the output until you recompile.
 
 | Script | What it does | Output |
 |--------|--------------|--------|
-| [`scripts/compile-analyzer.ps1`](scripts/compile-analyzer.ps1) | Runs `nlp.exe -COMPILE` (emits `Cc_code.cpp` plus the `Sym*.cpp` / `Con*.cpp` / `Ptr*.cpp` / `St*.cpp` tables under `<analyzer>\kb`), generates a `kb_setup()` shim that forwards to `cc_ini`, and links everything into a single DLL against `compile-libs/`. Only `kb_setup` is exported (MSVC hides every other symbol by default). | `<analyzer>\bin\kb.dll` |
+| [`scripts/compile-analyzer.ps1`](scripts/compile-analyzer.ps1) | Runs `nlp.exe -COMPILE` (emits the analyzer C++ trees under `<analyzer>\run` and `<analyzer>\kb`), then links everything into a single DLL against `compile-libs/`. The DLL exports both `run_analyzer(Parse*)` and `kb_setup(void*)` (engine codegen emits both). | `<analyzer>\bin\run.dll`<br>`<analyzer>\bin\runu.dll`<br>`<analyzer>\bin\kb.dll`<br>`<analyzer>\bin\kbu.dll` |
 
-A `.bat` shim of the same name ships alongside the `.ps1`, so the script can be run either directly from PowerShell or from `cmd.exe`.
+The same DLL is staged under all four filenames so the engine's
+load paths find it whether it's looking for the ANSI or UNICODE
+build flavour ([lite/nlp.cpp:1242](https://github.com/VisualText/nlp-engine/blob/master/lite/nlp.cpp#L1242) / [cs/libconsh/cg.cpp:168](https://github.com/VisualText/nlp-engine/blob/master/cs/libconsh/cg.cpp#L168)).
+
+A `.bat` shim of the same name ships alongside the `.ps1`, so the
+script can be run either directly from PowerShell or from `cmd.exe`.
 
 ### Prerequisites
 
@@ -95,26 +105,29 @@ A `.bat` shim of the same name ships alongside the `.ps1`, so the script can be 
 ### Usage
 
 ```powershell
-# Compile the bundled rfb analyzer's KB:
+# Default: full-analyzer compile (run + kb):
 .\scripts\compile-analyzer.ps1 data\rfb data\rfb\input\text.txt
 
 # Or from cmd.exe via the .bat shim:
 scripts\compile-analyzer.bat data\rfb data\rfb\input\text.txt
 
-# Run with the compiled KB (rules stay interpreted, KB is LoadLibrary'd):
+# Legacy: KB-only compile (matches the pre-NLP-ENGINE-WINDOWS-007 behaviour):
+.\scripts\compile-analyzer.ps1 -KbOnly data\rfb data\rfb\input\text.txt
+
+# Run with the compiled artifacts:
 .\nlp.exe -COMPILED -ANA data\rfb -WORK . data\rfb\input\text.txt
 ```
 
-What you should see in the `-COMPILED` output for a successful round-trip:
+What you should see in the `-COMPILED` output for a successful
+round-trip:
 
 ```
 [CG: Trying to load compiled KB.]
 [Loading compiled kb: data\rfb\bin\kb.dll]
 [Loaded compiled kb library]
-[Loading compiled analyzer ...]
-[Error: Couldn't load compiled analyzer.]      # expected -- no run.dll exists
-[No compiled analyzer; falling back to interpreted.]
-... normal parse output ...
+[Loading compiled analyzer data\rfb\bin\run.dll]
+[Loaded compiled analyzer]
+... parse output ...
 ```
 
 ### How ICU is linked
