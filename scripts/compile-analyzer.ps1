@@ -15,9 +15,16 @@
   and bin\kbu.dll. Without it (default), the full analyzer is compiled
   and bin\run.dll / bin\runu.dll are produced too.
 
+.PARAMETER AnalyzerOnly
+  If set, build only the analyzer rules (-COMPILEANA) — produces just
+  bin\run.dll and bin\runu.dll, leaving any existing bin\kb.dll in place.
+  Use when only the rules changed and the KB is already compiled. Mutually
+  exclusive with -KbOnly.
+
 .EXAMPLE
   scripts\compile-analyzer.ps1 data\rfb data\rfb\input\text.txt
   scripts\compile-analyzer.ps1 -KbOnly data\rfb data\rfb\input\text.txt
+  scripts\compile-analyzer.ps1 -AnalyzerOnly data\rfb data\rfb\input\text.txt
 
 .NOTES
   Requires Visual Studio 2022 (or Build Tools) with the "Desktop development
@@ -34,13 +41,18 @@
   Output (-KbOnly):
     <AnalyzerDir>\bin\kb.dll
     <AnalyzerDir>\bin\kbu.dll
+
+  Output (-AnalyzerOnly):
+    <AnalyzerDir>\bin\run.dll
+    <AnalyzerDir>\bin\runu.dll
 #>
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)] [string] $AnalyzerDir,
     [Parameter(Mandatory = $true, Position = 1)] [string] $InputFile,
-    [switch] $KbOnly
+    [switch] $KbOnly,
+    [switch] $AnalyzerOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,10 +74,17 @@ if (-not (Test-Path $InputFile)) {
 }
 $InputFile = (Resolve-Path $InputFile).Path
 
+if ($KbOnly -and $AnalyzerOnly) {
+    throw "Specify at most one of -KbOnly or -AnalyzerOnly."
+}
 if ($KbOnly) {
     $CompileFlag = '-COMPILEKB'
     $TargetName  = 'nlp_kb'
     $SrcGlobDesc = 'kb'
+} elseif ($AnalyzerOnly) {
+    $CompileFlag = '-COMPILEANA'
+    $TargetName  = 'nlp_run'
+    $SrcGlobDesc = 'run'
 } else {
     $CompileFlag = '-COMPILE'
     $TargetName  = 'nlp_analyzer'
@@ -237,6 +256,8 @@ $cmakeLibDir    = (Join-Path $CompileLibs 'lib')          -replace '\\', '/'
 
 if ($KbOnly) {
     $globExpr = "`"$cmakeAnalyzer/kb/*.cpp`""
+} elseif ($AnalyzerOnly) {
+    $globExpr = "`"$cmakeAnalyzer/run/*.cpp`""
 } else {
     $globExpr = "`"$cmakeAnalyzer/run/*.cpp`" `"$cmakeAnalyzer/kb/*.cpp`""
 }
@@ -310,6 +331,8 @@ if (-not (Test-Path $builtDll)) {
 
 if ($KbOnly) {
     $stagedNames = @('kb.dll', 'kbu.dll')
+} elseif ($AnalyzerOnly) {
+    $stagedNames = @('run.dll', 'runu.dll')
 } else {
     $stagedNames = @('run.dll', 'runu.dll', 'kb.dll', 'kbu.dll')
 }
