@@ -86,9 +86,13 @@ DLLs that the engine `LoadLibrary`s at runtime — the analyzer runs
 entirely from compiled code, so source edits to `.nlp` files between
 runs don't affect the output until you recompile.
 
-| Script | What it does | Output |
-|--------|--------------|--------|
-| [`scripts/compile-analyzer.ps1`](scripts/compile-analyzer.ps1) | Runs `nlp.exe -COMPILE` (emits the analyzer C++ trees under `<analyzer>\run` and `<analyzer>\kb`), then links everything into a single DLL against `compile-libs/`. The DLL exports both `run_analyzer(Parse*)` and `kb_setup(void*)` (engine codegen emits both). | `<analyzer>\bin\run.dll`<br>`<analyzer>\bin\runu.dll`<br>`<analyzer>\bin\kb.dll`<br>`<analyzer>\bin\kbu.dll` |
+| Mode | Flag | What it does | Output |
+|------|------|--------------|--------|
+| Full (default) | `-COMPILE` | Runs `nlp.exe -COMPILE` (emits the analyzer C++ trees under `<analyzer>\run` and `<analyzer>\kb`), then links everything into a single DLL against `compile-libs/`. The DLL exports both `run_analyzer(Parse*)` and `kb_setup(void*)` (engine codegen emits both). | `<analyzer>\bin\run.dll`<br>`<analyzer>\bin\runu.dll`<br>`<analyzer>\bin\kb.dll`<br>`<analyzer>\bin\kbu.dll` |
+| KB only | `-KbOnly` (`-COMPILEKB`) | Compiles only the knowledge base. Use when only the KB changed. | `<analyzer>\bin\kb.dll`<br>`<analyzer>\bin\kbu.dll` |
+| Analyzer only | `-AnalyzerOnly` (`-COMPILEANA`) | Compiles only the analyzer rules, leaving any existing `kb.dll` in place. Use when only the rules changed and the KB is already compiled. | `<analyzer>\bin\run.dll`<br>`<analyzer>\bin\runu.dll` |
+
+[`scripts/compile-analyzer.ps1`](scripts/compile-analyzer.ps1) drives all three modes.
 
 The same DLL is staged under all four filenames so the engine's
 load paths find it whether it's looking for the ANSI or UNICODE
@@ -111,8 +115,12 @@ script can be run either directly from PowerShell or from `cmd.exe`.
 # Or from cmd.exe via the .bat shim:
 scripts\compile-analyzer.bat data\rfb data\rfb\input\text.txt
 
-# Legacy: KB-only compile (matches the pre-NLP-ENGINE-WINDOWS-007 behaviour):
+# KB-only compile (-COMPILEKB): rebuild just kb.dll / kbu.dll:
 .\scripts\compile-analyzer.ps1 -KbOnly data\rfb data\rfb\input\text.txt
+
+# Analyzer-only compile (-COMPILEANA): rebuild just run.dll / runu.dll,
+# leaving the existing kb.dll in place. Use when only the rules changed:
+.\scripts\compile-analyzer.ps1 -AnalyzerOnly data\rfb data\rfb\input\text.txt
 
 # Run with the compiled artifacts:
 .\nlp.exe -COMPILED -ANA data\rfb -WORK . data\rfb\input\text.txt
