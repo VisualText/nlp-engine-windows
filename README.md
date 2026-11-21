@@ -1,5 +1,7 @@
 # NLP Engine for Windows
 
+[![PyPI: NLPPlus](https://img.shields.io/pypi/v/NLPPlus?label=PyPI%20NLPPlus&logo=pypi&logoColor=white)](https://pypi.org/project/NLPPlus/) [![npm: nlpplus](https://img.shields.io/npm/v/nlpplus?label=npm%20nlpplus&logo=npm)](https://www.npmjs.com/package/nlpplus)
+
 Prebuilt Windows binaries of the [VisualText NLP Engine](https://github.com/VisualText/nlp-engine), packaged together with the `data/` knowledge bases and a Python wrapper so the engine can be downloaded and used out of the box — no compilation required.
 
 The NLP Engine is the runtime for [NLP++](https://visualtext.org/), a domain-specific language for natural-language analyzers. This repository tracks upstream releases automatically and republishes them as a Windows-ready bundle.
