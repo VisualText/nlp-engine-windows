@@ -17,7 +17,7 @@ The NLP Engine is distributed per platform. Pick the one that matches your OS:
 | macOS    | [VisualText/nlp-engine-mac](https://github.com/VisualText/nlp-engine-mac) |
 | Source   | [VisualText/nlp-engine](https://github.com/VisualText/nlp-engine) |
 
-For production use from Python, prefer the [NLPPlus Python package](https://github.com/VisualText/py-package-nlpengine) instead of the simple wrapper shipped here.
+For production use from Python, prefer the [NLPPlus Python package](https://pypi.org/project/NLPPlus/) instead of the simple wrapper shipped here.
 
 ## Repository contents
 
@@ -77,7 +77,7 @@ engine = NLPEngine(
 engine.analyzeFile("my-analyzer", "sample.txt")
 ```
 
-For production workloads, prefer the [NLPPlus Python package](https://github.com/VisualText/py-package-nlpengine), which links against the engine directly instead of shelling out.
+For production workloads, prefer the [NLPPlus Python package](https://pypi.org/project/NLPPlus/), which links against the engine directly instead of shelling out.
 
 ## Compiling an analyzer to native DLLs
 
@@ -174,7 +174,7 @@ If `actions/github-script` throws `Could not find <asset> in release …`, an up
 - [VisualText/nlp-engine](https://github.com/VisualText/nlp-engine) — upstream source for the engine itself.
 - [VisualText/nlp-engine-linux](https://github.com/VisualText/nlp-engine-linux) — Linux binary bundle.
 - [VisualText/nlp-engine-mac](https://github.com/VisualText/nlp-engine-mac) — macOS binary bundle.
-- [VisualText/py-package-nlpengine](https://github.com/VisualText/py-package-nlpengine) — production-grade Python bindings.
+- [VisualText/py-package-nlpengine](https://github.com/VisualText/py-package-nlpengine) — production-grade Python bindings, published as [NLPPlus on PyPI](https://pypi.org/project/NLPPlus/).
 - [VisualText NLP++ VSCode Extension](https://marketplace.visualstudio.com/items?itemName=dehilster.nlp) — IDE integration that drives `nlp.exe`.
 
 ## License
